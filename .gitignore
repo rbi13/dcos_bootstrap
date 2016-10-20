@@ -1,0 +1,10 @@
+
+# do not keep actual configs
+/genconf/config.yaml
+/genconf/serve/
+/genconf/state/
+/genconf/cluster_packages.json
+/dcos-genconf.*
+/dcos_generate_config.sh
+/master-nodes
+/agent-nodes

@@ -1,0 +1,29 @@
+#!/bin/bash
+
+PORT=80
+
+master-nodes-setup(){
+	while read node; do
+		echo $node
+	done < master-nodes
+}
+
+agent-nodes-setup(){
+	while read node; do
+		echo $node
+	done < agent-nodes
+}
+
+dcos-config-gen(){
+	if [ ! -f 'dcos_generate_config.sh' ]; then
+		wget --no-check-certificate https://downloads.dcos.io/dcos/stable/dcos_generate_config.sh 
+		chmod +x dcos_generate_config.sh 
+		./dcos_generate_config.sh
+	fi
+}
+
+#docker run -d -p $PORT:80 -v $PWD/genconf/serve:/usr/share/nginx/html:ro nginx
+
+master-nodes-setup
+agent-nodes-setup
+
