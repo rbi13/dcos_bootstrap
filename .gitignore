@@ -8,3 +8,4 @@
 /dcos_generate_config.sh
 /master-nodes
 /agent-nodes
+/node-admins

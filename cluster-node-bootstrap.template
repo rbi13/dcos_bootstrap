@@ -1,0 +1,36 @@
+#!/bin/bash
+# TODO: should puppetize
+
+node_type=$1
+bootstrap_url="http://<bootstrap_http>"
+
+# TODO: check/enable ntp
+
+# disable firewalld
+# sudo systemctl stop firewalld && sudo systemctl disable firewalld
+
+# install missing utilities
+sudo yum install -y tar xz unzip curl ipset
+
+# disable SE-Linux : NEEDS REBOOT if SE linux not already disabled
+#sudo sed -i s/SELINUX=enforcing/SELINUX=permissive/g /etc/selinux/config &&
+sudo groupadd nogroup
+
+# install and start docker
+curl -O "${bootstrap_url}/docker/docker.tgz"
+curl -O "${bootstrap_url}/docker/docker.service"
+curl -O "${bootstrap_url}/docker/docker.socket"
+curl -O "${bootstrap_url}/docker/http-proxy.conf"
+tar -xvzf docker.tgz
+sudo mv docker/* /usr/bin/
+sudo cp docker.service docker.socket /etc/systemd/system
+sudo mkdir -p /etc/systemd/system/docker.service.d/
+sudo cp http-proxy.conf /etc/systemd/system/docker.service.d/
+sudo groupadd docker
+sudo usermod -aG docker $USER
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# install DCOS
+curl -O "${bootstrap_url}/dcos_install.sh"
+sudo bash dcos_install.sh ${node_type}

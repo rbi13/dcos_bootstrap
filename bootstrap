@@ -1,29 +1,96 @@
 #!/bin/bash
 
+IP=10.6.161.204
 PORT=80
+#version-docker='latest' 1.12.x not yet supported by dcos
+docker_version='1.11.2'
+serve='genconf/serve'
+sudo_group='wheel'
+ssh_pub_key='~/.ssh/id_rsa.pub'
 
-master-nodes-setup(){
-	while read node; do
-		echo $node
-	done < master-nodes
-}
 
-agent-nodes-setup(){
-	while read node; do
-		echo $node
-	done < agent-nodes
+server-start(){
+	docker run -d -p $PORT:80 -v $PWD/genconf/serve:/usr/share/nginx/html:ro nginx
 }
 
 dcos-config-gen(){
-	if [ ! -f 'dcos_generate_config.sh' ]; then
-		wget --no-check-certificate https://downloads.dcos.io/dcos/stable/dcos_generate_config.sh 
-		chmod +x dcos_generate_config.sh 
-		./dcos_generate_config.sh
-	fi
+	# generate configuration
+	curl -O https://downloads.dcos.io/dcos/stable/dcos_generate_config.sh | bash
+	# download and serve docker installation packages
+	docker-bootsrap
+	# configure and serve cluster-node-script 
+	cat cluster-node-bootstrap.template |
+		sed "s/<bootstrap_http>/${IP}:${PORT}/g" > "${serve}/cluster-node-bootstrap"
+	# host public key for node access
+	cp ${ssh_pub_key} "${serve}/dcos_key.pub"
+	# start bootstrap server
+	server-start
 }
 
-#docker run -d -p $PORT:80 -v $PWD/genconf/serve:/usr/share/nginx/html:ro nginx
+docker-bootstrap(){
+	docker_systemd='https://raw.githubusercontent.com/docker/docker/master/contrib/init/systemd'
+	docker_tar='https://get.docker.com/builds/Linux/x86_64'
+	mkdir -p "${serve}/docker"
+	curl -o "${serve}/docker/docker.tgz" "${docker_tar}/docker-${docker_version}.tgz"
+	# TODO: replace dockerd with docker daemon in .service's EXEC
+	curl -o "${serve}/docker/docker.service" "${docker_systemd}/docker.service"
+	curl -o "${serve}/docker/docker.socket" "${docker_systemd}/docker.socket"
+	# TODO: mv config to 
+	# cp docker-http-proxy.conf ${serve}/docker/http-proxy.conf
+}
 
-master-nodes-setup
-agent-nodes-setup
+nodes-dcosuser-setup(){
+	while read node; do
+		IFS=':' read -r -a arr <<< "$node"
+		echo "${arr[1]}@${arr[0]}"
+		ssh -n -tt "${arr[1]}@${arr[0]}" "sudo adduser dcos --group ${sudo_group} && \
+			sudo mkdir -p ~dcos/.ssh && \
+			sudo chown dcos:dcos ~dcos/.ssh && \
+			sudo curl -o ~dcos/.ssh/authorized_keys http://${IP}:${PORT}/dcos_key.pub  && \
+			sudo chown dcos:dcos ~dcos/.ssh/authorized_keys && \
+			sudo chmod 700 ~dcos/.ssh && \
+			sudo chmod 640 ~dcos/.ssh/authorized_keys"
+	done < node-admins
+}
 
+node-setup(){
+	node=$1
+	mode=$2
+	echo $node
+	ssh -n -tt "dcos@$node" "mkdir -p /tmp/dcos && cd /tmp/dcos && \
+	curl -O http://${IP}:${PORT}/dcos_install.sh && \
+	curl -O http://${IP}:${PORT}/cluster-node-bootstrap && \
+	bash cluster-node-bootstrap ${mode}"
+}
+
+multi-node-setup(){
+	node_list=$1
+	mode=$2
+	while read node; do
+		node-setup ${node} ${mode}
+	done < "${node_list}"
+}
+
+cluster-setup(){
+	master_list=$1
+	agent_list=$2
+	multi-node-setup ${master_list} 'master'
+	multi-node-setup ${agent_list} 'slave'
+}
+
+node-uninstall(){
+	node=$1
+	echo $node
+	ssh -n -tt "dcos@$node" 'sudo -i /opt/mesosphere/bin/pkgpanda uninstall && \
+	sudo rm -rf /opt/mesosphere /etc/mesosphere'
+}
+
+multi-nodes-uninstall(){
+	node_list=$1
+	while read node; do
+		node-setup ${node}
+	done < "${node_list}"
+}
+
+# verbatim script
+$@
