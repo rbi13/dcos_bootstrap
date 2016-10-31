@@ -70,7 +70,7 @@ multi-node-setup(){
 	node_list=$1
 	mode=$2
 	while read node; do
-		node-setup ${node} ${mode}
+		node-setup ${node} ${mode} &
 	done < "${node_list}"
 }
 
@@ -91,7 +91,7 @@ node-uninstall(){
 multi-nodes-uninstall(){
 	node_list=$1
 	while read node; do
-		node-setup ${node}
+		node-uninstall ${node} &
 	done < "${node_list}"
 }
 

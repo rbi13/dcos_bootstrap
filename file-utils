@@ -1,0 +1,12 @@
+#!/bin/bash
+
+put(){
+	node_list=$1
+	localdir=$2
+	remotedir=$3
+	while read node; do
+		echo $node
+		scp -r "${localdir}" "dcos@$node:{$remotedir}" &
+	done < "${node_list}"
+}
+
