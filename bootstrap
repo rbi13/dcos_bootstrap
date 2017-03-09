@@ -1,6 +1,6 @@
 #!/bin/bash
 
-IP=10.6.161.204
+IP=10.6.161.137
 PORT=80
 #version-docker='latest' 1.12.x not yet supported by dcos
 docker_version='1.11.2'
@@ -21,7 +21,7 @@ dcos-config-gen(){
 	curl -o "${serve}/dcos-local-universe-registry.service" https://raw.githubusercontent.com/mesosphere/universe/version-3.x/docker/local-universe/dcos-local-universe-registry.service
 	# download and serve docker installation packages
 	docker-bootsrap
-	# configure and serve cluster-node-script 
+	# configure and serve cluster-node-script
 	cat cluster-node-bootstrap.template |
 		sed "s/<bootstrap_http>/${IP}:${PORT}/g" > "${serve}/cluster-node-bootstrap"
 	# host public key for node access
@@ -38,7 +38,7 @@ docker-bootstrap(){
 	# TODO: replace dockerd with docker daemon in .service's EXEC
 	curl -o "${serve}/docker/docker.service" "${docker_systemd}/docker.service"
 	curl -o "${serve}/docker/docker.socket" "${docker_systemd}/docker.socket"
-	# TODO: mv config to 
+	# TODO: mv config to
 	# cp docker-http-proxy.conf ${serve}/docker/http-proxy.conf
 }
 
@@ -54,6 +54,18 @@ nodes-dcosuser-setup(){
 			sudo chmod 700 ~dcos/.ssh && \
 			sudo chmod 640 ~dcos/.ssh/authorized_keys"
 	done < node-admins
+}
+
+node-keyscan(){
+	node=$1
+	ssh-keyscan -H ${node} >> ~/.ssh/known_hosts
+}
+
+multi-node-keyscan(){
+	node_list=$1
+	while read node; do
+		node-keyscan ${node}
+	done < "${node_list}"
 }
 
 node-setup(){
@@ -88,7 +100,7 @@ node-uninstall(){
 		sudo rm -rf /opt/mesosphere /etc/mesosphere'
 }
 
-multi-nodes-uninstall(){
+multi-node-uninstall(){
 	node_list=$1
 	while read node; do
 		node-uninstall ${node} &
@@ -96,7 +108,7 @@ multi-nodes-uninstall(){
 }
 
 get-local-universe(){
-	# download image 
+	# download image
 	if [ ! -f "${serve}/local-universe.tar.gz" ]; then
 		curl -o "${serve}/local-universe.tar.gz" https://downloads.mesosphere.com/universe/public/local-universe.tar.gz
 	fi
@@ -105,7 +117,7 @@ get-local-universe(){
 # assumes dcos-cli installed
 local-universe-install(){
 	master_list=$1
-	agent_list=$2	
+	agent_list=$2
 	while read node; do
 		echo $node
 		ssh -n -tt "dcos@$node" "curl -O ${server}/local-universe.tar.gz && \

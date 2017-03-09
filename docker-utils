@@ -22,6 +22,7 @@ pull(){
 		echo $node
 		ssh -n "dcos@$node" "docker pull ${image}" &
 	done < "${node_list}"
+	wait
 }
 
 images(){
