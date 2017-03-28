@@ -21,11 +21,13 @@ curl -O "${bootstrap_url}/docker/docker.tgz"
 curl -O "${bootstrap_url}/docker/docker.service"
 curl -O "${bootstrap_url}/docker/docker.socket"
 curl -O "${bootstrap_url}/docker/http-proxy.conf"
+curl -O "${bootstrap_url}/docker/docker-login.tar.gz"
 tar -xvzf docker.tgz
 sudo mv docker/* /usr/bin/
 sudo cp docker.service docker.socket /etc/systemd/system
 sudo mkdir -p /etc/systemd/system/docker.service.d/
 sudo cp http-proxy.conf /etc/systemd/system/docker.service.d/
+sudo cp docker-login.tar.gz /etc/docker.tar.gz
 sudo groupadd docker
 sudo usermod -aG docker $USER
 sudo systemctl start docker

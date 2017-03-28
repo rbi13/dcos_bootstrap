@@ -1,14 +1,22 @@
 #!/bin/bash
 
-IP=10.6.161.137
+# TODO:
+# - replace key with that of d10
+# - get docker login tar
+
+IP=172.26.141.49
 PORT=80
-#version-docker='latest' 1.12.x not yet supported by dcos
 docker_version='1.11.2'
 serve='genconf/serve'
 sudo_group='wheel'
-ssh_pub_key='~/.ssh/id_rsa.pub'
+ssh_pub_key='~/.ssh/dcos_key.pub'
 
 server="http://${IP}:${PORT}"
+
+mesos_git='https://raw.githubusercontent.com/mesosphere/universe/version-3.x/docker/local-universe'
+universe='https://downloads.mesosphere.com/universe/public/local-universe.tar.gz'
+docker_systemd='https://raw.githubusercontent.com/docker/docker/master/contrib/init/systemd'
+docker_tar='https://get.docker.com/builds/Linux/x86_64'
 
 server-start(){
 	docker run -d -p $PORT:80 -v $PWD/genconf/serve:/usr/share/nginx/html:ro nginx
@@ -17,10 +25,10 @@ server-start(){
 dcos-config-gen(){
 	# generate configuration
 	curl -O https://downloads.dcos.io/dcos/stable/dcos_generate_config.sh | bash
-	curl -o "${serve}/dcos-local-universe-http.service" https://raw.githubusercontent.com/mesosphere/universe/version-3.x/docker/local-universe/dcos-local-universe-http.service
-	curl -o "${serve}/dcos-local-universe-registry.service" https://raw.githubusercontent.com/mesosphere/universe/version-3.x/docker/local-universe/dcos-local-universe-registry.service
+	curl -o "${serve}/dcos-local-universe-http.service" "${mesos_git}/dcos-local-universe-http.service"
+	curl -o "${serve}/dcos-local-universe-registry.service" "${mesos_git}/dcos-local-universe-registry.service"
 	# download and serve docker installation packages
-	docker-bootsrap
+	docker-bootstrap
 	# configure and serve cluster-node-script
 	cat cluster-node-bootstrap.template |
 		sed "s/<bootstrap_http>/${IP}:${PORT}/g" > "${serve}/cluster-node-bootstrap"
@@ -31,20 +39,17 @@ dcos-config-gen(){
 }
 
 docker-bootstrap(){
-	docker_systemd='https://raw.githubusercontent.com/docker/docker/master/contrib/init/systemd'
-	docker_tar='https://get.docker.com/builds/Linux/x86_64'
 	mkdir -p "${serve}/docker"
 	curl -o "${serve}/docker/docker.tgz" "${docker_tar}/docker-${docker_version}.tgz"
-	# TODO: replace dockerd with docker daemon in .service's EXEC
 	curl -o "${serve}/docker/docker.service" "${docker_systemd}/docker.service"
 	curl -o "${serve}/docker/docker.socket" "${docker_systemd}/docker.socket"
-	# TODO: mv config to
-	# cp docker-http-proxy.conf ${serve}/docker/http-proxy.conf
+	cp http-proxy.conf ${serve}/docker/
+	cp docker-login.tar.gz ${serve}/docker/
 }
 
 nodes-dcosuser-setup(){
 	while read node; do
-		IFS=':' read -r -a arr <<< "$node"
+		read -r -a arr <<< "$node"
 		echo "${arr[1]}@${arr[0]}"
 		ssh -n -tt "${arr[1]}@${arr[0]}" "sudo adduser dcos --group ${sudo_group} && \
 			sudo mkdir -p ~dcos/.ssh && \
@@ -110,7 +115,7 @@ multi-node-uninstall(){
 get-local-universe(){
 	# download image
 	if [ ! -f "${serve}/local-universe.tar.gz" ]; then
-		curl -o "${serve}/local-universe.tar.gz" https://downloads.mesosphere.com/universe/public/local-universe.tar.gz
+		curl -o "${serve}/local-universe.tar.gz" ${universe}
 	fi
 }
 
