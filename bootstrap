@@ -1,13 +1,22 @@
 #!/bin/bash
 
-IP=10.6.161.204
+# TODO:
+# - replace key with that of d10
+# - get docker login tar
+
+IP=172.26.141.49
 PORT=80
-#version-docker='latest' 1.12.x not yet supported by dcos
 docker_version='1.11.2'
 serve='genconf/serve'
 sudo_group='wheel'
-ssh_pub_key='~/.ssh/id_rsa.pub'
+ssh_pub_key='~/.ssh/dcos_key.pub'
 
+server="http://${IP}:${PORT}"
+
+mesos_git='https://raw.githubusercontent.com/mesosphere/universe/version-3.x/docker/local-universe'
+universe='https://downloads.mesosphere.com/universe/public/local-universe.tar.gz'
+docker_systemd='https://raw.githubusercontent.com/docker/docker/master/contrib/init/systemd'
+docker_tar='https://get.docker.com/builds/Linux/x86_64'
 
 server-start(){
 	docker run -d -p $PORT:80 -v $PWD/genconf/serve:/usr/share/nginx/html:ro nginx
@@ -16,9 +25,11 @@ server-start(){
 dcos-config-gen(){
 	# generate configuration
 	curl -O https://downloads.dcos.io/dcos/stable/dcos_generate_config.sh | bash
+	curl -o "${serve}/dcos-local-universe-http.service" "${mesos_git}/dcos-local-universe-http.service"
+	curl -o "${serve}/dcos-local-universe-registry.service" "${mesos_git}/dcos-local-universe-registry.service"
 	# download and serve docker installation packages
-	docker-bootsrap
-	# configure and serve cluster-node-script 
+	docker-bootstrap
+	# configure and serve cluster-node-script
 	cat cluster-node-bootstrap.template |
 		sed "s/<bootstrap_http>/${IP}:${PORT}/g" > "${serve}/cluster-node-bootstrap"
 	# host public key for node access
@@ -28,20 +39,17 @@ dcos-config-gen(){
 }
 
 docker-bootstrap(){
-	docker_systemd='https://raw.githubusercontent.com/docker/docker/master/contrib/init/systemd'
-	docker_tar='https://get.docker.com/builds/Linux/x86_64'
 	mkdir -p "${serve}/docker"
 	curl -o "${serve}/docker/docker.tgz" "${docker_tar}/docker-${docker_version}.tgz"
-	# TODO: replace dockerd with docker daemon in .service's EXEC
 	curl -o "${serve}/docker/docker.service" "${docker_systemd}/docker.service"
 	curl -o "${serve}/docker/docker.socket" "${docker_systemd}/docker.socket"
-	# TODO: mv config to 
-	# cp docker-http-proxy.conf ${serve}/docker/http-proxy.conf
+	cp http-proxy.conf ${serve}/docker/
+	cp docker-login.tar.gz ${serve}/docker/
 }
 
 nodes-dcosuser-setup(){
 	while read node; do
-		IFS=':' read -r -a arr <<< "$node"
+		read -r -a arr <<< "$node"
 		echo "${arr[1]}@${arr[0]}"
 		ssh -n -tt "${arr[1]}@${arr[0]}" "sudo adduser dcos --group ${sudo_group} && \
 			sudo mkdir -p ~dcos/.ssh && \
@@ -53,21 +61,33 @@ nodes-dcosuser-setup(){
 	done < node-admins
 }
 
+node-keyscan(){
+	node=$1
+	ssh-keyscan -H ${node} >> ~/.ssh/known_hosts
+}
+
+multi-node-keyscan(){
+	node_list=$1
+	while read node; do
+		node-keyscan ${node}
+	done < "${node_list}"
+}
+
 node-setup(){
 	node=$1
 	mode=$2
 	echo $node
 	ssh -n -tt "dcos@$node" "mkdir -p /tmp/dcos && cd /tmp/dcos && \
-	curl -O http://${IP}:${PORT}/dcos_install.sh && \
-	curl -O http://${IP}:${PORT}/cluster-node-bootstrap && \
-	bash cluster-node-bootstrap ${mode}"
+		curl -O ${server}/dcos_install.sh && \
+		curl -O ${server}/cluster-node-bootstrap && \
+		bash cluster-node-bootstrap ${mode}"
 }
 
 multi-node-setup(){
 	node_list=$1
 	mode=$2
 	while read node; do
-		node-setup ${node} ${mode}
+		node-setup ${node} ${mode} &
 	done < "${node_list}"
 }
 
@@ -82,14 +102,47 @@ node-uninstall(){
 	node=$1
 	echo $node
 	ssh -n -tt "dcos@$node" 'sudo -i /opt/mesosphere/bin/pkgpanda uninstall && \
-	sudo rm -rf /opt/mesosphere /etc/mesosphere'
+		sudo rm -rf /opt/mesosphere /etc/mesosphere'
 }
 
-multi-nodes-uninstall(){
+multi-node-uninstall(){
 	node_list=$1
 	while read node; do
-		node-setup ${node}
+		node-uninstall ${node} &
 	done < "${node_list}"
+}
+
+get-local-universe(){
+	# download image
+	if [ ! -f "${serve}/local-universe.tar.gz" ]; then
+		curl -o "${serve}/local-universe.tar.gz" ${universe}
+	fi
+}
+
+# assumes dcos-cli installed
+local-universe-install(){
+	master_list=$1
+	agent_list=$2
+	while read node; do
+		echo $node
+		ssh -n -tt "dcos@$node" "curl -O ${server}/local-universe.tar.gz && \
+			docker load < local-universe.tar.gz && \
+			sudo curl -o /etc/systemd/system/dcos-local-universe-http.service ${server}/dcos-local-universe-http.service && \
+			sudo curl -o /etc/systemd/system/dcos-local-universe-registry.service ${server}/dcos-local-universe-registry.service && \
+			sudo systemctl daemon-reload && \
+			sudo systemctl start dcos-local-universe-http && \
+			sudo systemctl start dcos-local-universe-registry"
+	done < "${master_list}"
+
+	dcos package repo remove Universe
+	dcos package repo add local-universe http://master.mesos:8082/repo
+
+	while read node; do
+		echo $node
+		ssh -n -tt "dcos@$node" "sudo mkdir -p /etc/docker/certs.d/master.mesos:5000 && \
+			sudo curl -o /etc/docker/certs.d/master.mesos:5000/ca.crt http://master.mesos:8082/certs/domain.crt && \
+			sudo systemctl restart docker"
+	done < "${agent_list}"
 }
 
 # verbatim script

@@ -1,0 +1,51 @@
+#!/bin/bash
+
+login(){
+	node_list=$1
+	registry=$2
+	read -p "username: " user
+	read -s -p "password: " pass
+	echo ''
+	while read node; do
+		echo $node
+		ssh -n "dcos@$node" "docker login \
+			-u ${user} \
+			-p ${pass} \
+			${registry}"
+	done < "${node_list}"
+}
+
+pull(){
+	node_list=$1
+	image=$2
+	while read node; do
+		echo $node
+		ssh -n "dcos@$node" "docker pull ${image}" &
+	done < "${node_list}"
+	wait
+}
+
+images(){
+	node_list=$1
+	while read node; do
+		echo $node
+		ssh -n "dcos@$node" "docker images"
+	done < "${node_list}"
+}
+
+debug(){
+	node=$1
+	echo $node
+	ssh -n -tt "dcos@$node" "sudo grep docker /var/log/messages"
+}
+
+retag(){
+	node_list=$1
+	while read node; do
+		echo $node
+		ssh -n "dcos@$node" "docker tag af.cds.bns:5001/kaldi kaldi"
+	done < "${node_list}"
+}
+
+# verbatim script
+$@
